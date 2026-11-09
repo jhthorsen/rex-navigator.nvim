@@ -5,9 +5,9 @@
 --
 --   require("rex-navigator").setup()
 --
--- ctrl-h/j/k/l moves between Rex panes, except when Vim or Neovim is the
--- focused program. Then the key goes through to it, and the Neovim side of the
--- plugin moves between its own splits, handing back to Rex at the edge.
+-- cmd-h/j/k/l moves between Rex panes. In Vim or Neovim, send ctrl-h/j/k/l
+-- instead, so the editor can move between its splits. OSC reports let Rex
+-- handle remote split edges without a CLI on the remote host.
 --
 
 local M = {}
@@ -15,10 +15,17 @@ local M = {}
 local defaults = {
   -- physical keys, so the binding doesn't depend on the keyboard layout
   keys = {
-    left = 'ctrl+[KeyH]',
-    down = 'ctrl+[KeyJ]',
-    up = 'ctrl+[KeyK]',
-    right = 'ctrl+[KeyL]',
+    left = 'cmd+[KeyH]',
+    down = 'cmd+[KeyJ]',
+    up = 'cmd+[KeyK]',
+    right = 'cmd+[KeyL]',
+  },
+  -- terminal keys sent to Vim; a list sends a sequence of keys
+  send_keys = {
+    left = 'ctrl+h',
+    down = 'ctrl+j',
+    up = 'ctrl+k',
+    right = 'ctrl+l',
   },
   -- Lua patterns matched against the focused program's name
   programs = { '^n?vim$', '^view$', '^n?vimdiff$' },
@@ -124,19 +131,34 @@ function M.setup(opts)
   local config = merge(defaults, opts)
 
   for direction, key in pairs(config.keys) do
-    rex.bind(key, function(ctx)
-      if should_forward(config.programs, direction) then
-        return false -- let the key through to Vim
-      end
+    local action = 'rex_navigator_' .. direction
+    -- Sending a client key must be queued from an action, not a function
+    -- binding. pane.send_key also honors the terminal's keyboard protocol.
+    rex.action({
+      name = action,
+      title = 'Navigate to the split or Rex pane ' .. direction,
+      run = function(ctx)
+        if should_forward(config.programs, direction) then
+          local keys = config.send_keys[direction]
+          if type(keys) == 'string' then
+            keys = { keys }
+          end
+          for _, send_key in ipairs(keys) do
+            rex.client.queue('pane.send_key', { key = send_key })
+          end
+          return true
+        end
 
-      -- the server method, the app's pane.focus.* actions always wrap
-      rex.call('session.focus_direction', {
-        session_id = ctx.session_id,
-        direction = direction,
-        wrap = config.wrap,
-      })
-      return true
-    end)
+        -- the server method, the app's pane.focus.* actions always wrap
+        rex.call('session.focus_direction', {
+          session_id = ctx.session_id,
+          direction = direction,
+          wrap = config.wrap,
+        })
+        return true
+      end,
+    })
+    rex.bind(key, action)
   end
 end
 

@@ -23,7 +23,7 @@ function M.check()
     vim.health.ok('Running inside Rex (REX_SESSION is set)')
   else
     vim.health.warn('No local Rex context or SSH OSC transport; <C-h/j/k/l> only moves between splits', {
-      "Use setup({ osc = true }) to enable OSC navigation explicitly",
+      'Use setup({ osc = true }) to enable OSC navigation explicitly',
     })
   end
 
