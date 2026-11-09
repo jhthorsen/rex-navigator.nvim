@@ -13,6 +13,8 @@ local defaults = {
   keymaps = true,
   -- continue from the opposite edge when no Rex pane lies that way
   wrap = false,
+  -- publish split navigation over OSC 7501 when SSH has no local Rex context
+  osc = 'auto',
 }
 
 local config = vim.deepcopy(defaults)
@@ -51,6 +53,14 @@ function M.in_rex()
   return vim.env.REX_SESSION ~= nil and vim.env.REX_SESSION ~= ''
 end
 
+function M.uses_osc()
+  if config.osc ~= 'auto' then
+    return config.osc == true
+  end
+  return not M.in_rex()
+    and ((vim.env.SSH_TTY or '') ~= '' or (vim.env.SSH_CONNECTION or '') ~= '')
+end
+
 function M.navigate(key)
   local direction = directions[key]
   if not direction then
@@ -60,9 +70,11 @@ function M.navigate(key)
   local win = vim.api.nvim_get_current_win()
   vim.cmd.wincmd(key)
 
-  if vim.api.nvim_get_current_win() == win and M.in_rex() then
+  if vim.api.nvim_get_current_win() == win and M.in_rex() and not M.uses_osc() then
     vim.system(M.focus_command(direction))
   end
+
+  require('rex-navigator.osc').update()
 end
 
 function M.left()
@@ -83,6 +95,7 @@ end
 
 function M.setup(opts)
   config = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
+  require('rex-navigator.osc').setup(M.uses_osc())
 
   if config.keymaps then
     for key, direction in pairs(directions) do
