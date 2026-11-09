@@ -11,12 +11,6 @@ local M = {}
 local defaults = {
   -- map <C-h/j/k/l> in normal mode
   keymaps = true,
-  keys = {
-    left = '<C-h>',
-    down = '<C-j>',
-    up = '<C-k>',
-    right = '<C-l>',
-  },
   -- continue from the opposite edge when no Rex pane lies that way
   wrap = false,
   -- publish split navigation over OSC 7501 when SSH has no local Rex context
@@ -63,7 +57,8 @@ function M.uses_osc()
   if config.osc ~= 'auto' then
     return config.osc == true
   end
-  return not M.in_rex() and ((vim.env.SSH_TTY or '') ~= '' or (vim.env.SSH_CONNECTION or '') ~= '')
+  return not M.in_rex()
+    and ((vim.env.SSH_TTY or '') ~= '' or (vim.env.SSH_CONNECTION or '') ~= '')
 end
 
 function M.navigate(key)
@@ -104,7 +99,7 @@ function M.setup(opts)
 
   if config.keymaps then
     for key, direction in pairs(directions) do
-      vim.keymap.set('n', config.keys[direction], function()
+      vim.keymap.set('n', '<C-' .. key .. '>', function()
         M.navigate(key)
       end, { desc = 'Move to the split or Rex pane ' .. direction })
     end

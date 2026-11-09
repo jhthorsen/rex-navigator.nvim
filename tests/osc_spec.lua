@@ -163,11 +163,7 @@ describe('OSC navigation', function()
     navigator.setup({ keymaps = false })
     drain()
     local window = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), true, {
-      relative = 'editor',
-      row = 1,
-      col = 1,
-      width = 10,
-      height = 5,
+      relative = 'editor', row = 1, col = 1, width = 10, height = 5,
     })
     drain()
     assert.is_true(contains('id=rex-navigator/v1/passthrough'))

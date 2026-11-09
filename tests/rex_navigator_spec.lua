@@ -21,14 +21,11 @@ describe('rex-navigator', function()
   end)
 
   after_each(function()
-    require('rex-navigator.osc').setup(false)
     vim.system = original_system
     vim.env.REX_SESSION = original_session
     vim.cmd('silent! only')
     for _, key in ipairs({ 'h', 'j', 'k', 'l' }) do
       pcall(vim.keymap.del, 'n', '<C-' .. key .. '>')
-      pcall(vim.keymap.del, 'n', '<M-' .. key .. '>')
-      pcall(vim.keymap.del, 'n', '<C-b>' .. key)
     end
   end)
 
@@ -97,14 +94,6 @@ describe('rex-navigator', function()
 
       local map = vim.fn.maparg('<C-h>', 'n', false, true)
       assert.is_nil(map.desc)
-    end)
-
-    it('accepts meta keys and key sequences while retaining other defaults', function()
-      navigator.setup({ keys = { left = '<M-h>', right = '<C-b>l' } })
-      assert.is_nil(vim.fn.maparg('<C-h>', 'n', false, true).desc)
-      assert.truthy(vim.fn.maparg('<M-h>', 'n', false, true).desc)
-      assert.truthy(vim.fn.maparg('<C-b>l', 'n', false, true).desc)
-      assert.truthy(vim.fn.maparg('<C-j>', 'n', false, true).desc)
     end)
 
     it('passes wrap through to Rex', function()

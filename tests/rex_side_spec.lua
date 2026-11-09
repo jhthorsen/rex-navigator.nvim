@@ -2,26 +2,11 @@
 -- binds and calls, so the Rex side can be tested without Rex
 
 local function fake_rex(foreground, records)
-  local fake =
-    { bindings = {}, actions = {}, calls = {}, sent_keys = {}, foreground = foreground, records = records or {} }
+  local fake = { bindings = {}, calls = {}, foreground = foreground, records = records or {} }
 
-  fake.action = function(action)
-    fake.actions[action.name] = action.run
+  fake.bind = function(key, fn)
+    fake.bindings[key] = fn
   end
-
-  fake.bind = function(key, action)
-    assert.is_string(action)
-    fake.bindings[key] = function(ctx)
-      return fake.actions[action](ctx)
-    end
-  end
-
-  fake.client = {
-    queue = function(action, args)
-      assert.are.equal('pane.send_key', action)
-      fake.sent_keys[#fake.sent_keys + 1] = args.key
-    end,
-  }
 
   fake.call = function(method, args)
     table.insert(fake.calls, { method = method, args = args })
@@ -59,49 +44,45 @@ describe('rex side', function()
     _G.rex = nil
   end)
 
-  it('binds the physical h/j/k/l keys with cmd, not ctrl', function()
+  it('binds the physical h/j/k/l keys with ctrl', function()
     local fake = load_rex_side({ name = 'zsh' })
 
-    for _, key in ipairs({ 'H', 'J', 'K', 'L' }) do
-      assert.is_function(fake.bindings['cmd+[Key' .. key .. ']'])
-      assert.is_nil(fake.bindings['ctrl+[Key' .. key .. ']'])
+    for _, key in ipairs({ 'ctrl+[KeyH]', 'ctrl+[KeyJ]', 'ctrl+[KeyK]', 'ctrl+[KeyL]' }) do
+      assert.is_function(fake.bindings[key])
     end
   end)
 
   it('focuses the pane in that direction outside of Vim', function()
     local fake = load_rex_side({ name = 'zsh', argv0 = '-zsh' })
 
-    local handled = fake.bindings['cmd+[KeyH]']({ session_id = 'session:test' })
+    local handled = fake.bindings['ctrl+[KeyH]']({ session_id = 'session:test' })
 
     assert.is_true(handled)
     assert.are.same({
       method = 'session.focus_direction',
       args = { session_id = 'session:test', direction = 'left', wrap = false },
     }, fake.calls[1])
-    assert.are.same({}, fake.sent_keys)
   end)
 
-  it('translates cmd to ctrl inside Neovim without forwarding cmd', function()
+  it('lets the key through to Neovim', function()
     local fake = load_rex_side({ name = 'nvim', argv0 = 'nvim' })
 
-    local handled = fake.bindings['cmd+[KeyL]']({ session_id = 'session:test' })
+    local handled = fake.bindings['ctrl+[KeyL]']({ session_id = 'session:test' })
 
-    assert.is_true(handled)
+    assert.is_false(handled)
     assert.are.same({}, fake.calls)
-    assert.are.same({ 'ctrl+l' }, fake.sent_keys)
   end)
 
   it('recognizes Vim started by a full path', function()
     local fake = load_rex_side({ name = 'something', argv0 = '/usr/bin/vim' })
 
-    assert.is_true(fake.bindings['cmd+[KeyJ]']({ session_id = 'session:test' }))
-    assert.are.same({ 'ctrl+j' }, fake.sent_keys)
+    assert.is_false(fake.bindings['ctrl+[KeyJ]']({ session_id = 'session:test' }))
   end)
 
   it('treats a block without a process as not Vim', function()
     local fake = load_rex_side('error')
 
-    assert.is_true(fake.bindings['cmd+[KeyK]']({ session_id = 'session:test' }))
+    assert.is_true(fake.bindings['ctrl+[KeyK]']({ session_id = 'session:test' }))
   end)
 
   it('accepts custom keys, programs, and wrap', function()
@@ -112,29 +93,16 @@ describe('rex side', function()
     })
 
     assert.is_function(fake.bindings['alt+h'])
-    assert.is_function(fake.bindings['cmd+[KeyJ]'])
-    assert.is_true(fake.bindings['alt+h']({ session_id = 'session:test' }))
-    assert.are.same({ 'ctrl+h' }, fake.sent_keys)
+    assert.is_function(fake.bindings['ctrl+[KeyJ]'])
+    assert.is_false(fake.bindings['alt+h']({ session_id = 'session:test' }))
   end)
 
   it('passes wrap through to Rex', function()
     local fake = load_rex_side({ name = 'zsh' }, { wrap = true })
 
-    fake.bindings['cmd+[KeyH]']({ session_id = 'session:test' })
+    fake.bindings['ctrl+[KeyH]']({ session_id = 'session:test' })
 
     assert.is_true(fake.calls[1].args.wrap)
-  end)
-
-  it('accepts custom terminal keys and sequences independently of Rex shortcuts', function()
-    local fake = load_rex_side({ name = 'nvim' }, {
-      keys = { left = 'ctrl+b>h' },
-      send_keys = { left = { 'ctrl+w', 'h' }, right = 'alt+l' },
-    })
-    assert.is_nil(fake.bindings['cmd+[KeyH]'])
-    assert.is_true(fake.bindings['ctrl+b>h']({ session_id = 'session:test' }))
-    assert.is_true(fake.bindings['cmd+[KeyL]']({ session_id = 'session:test' }))
-    assert.are.same({ 'ctrl+w', 'h', 'alt+l' }, fake.sent_keys)
-    assert.are.same({}, fake.calls)
   end)
 
   describe('SSH navigation reports', function()
@@ -148,11 +116,9 @@ describe('rex side', function()
         record('rex-navigator/v1/right'),
       })
 
-      assert.is_true(fake.bindings['cmd+[KeyL]']({ session_id = 'remote' }))
+      assert.is_false(fake.bindings['ctrl+[KeyL]']({ session_id = 'remote' }))
       assert.are.same({}, fake.calls)
-      assert.are.same({ 'ctrl+l' }, fake.sent_keys)
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({ 'ctrl+l' }, fake.sent_keys)
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
       assert.are.same({
         method = 'session.focus_direction',
         args = { session_id = 'remote', direction = 'left', wrap = false },
@@ -162,10 +128,9 @@ describe('rex side', function()
     it('handles all four edges of a remote editor with no splits', function()
       local fake = load_rex_side({ name = 'ssh' }, { wrap = true }, { record('rex-navigator/v1') })
       for _, key in ipairs({ 'H', 'J', 'K', 'L' }) do
-        assert.is_true(fake.bindings['cmd+[Key' .. key .. ']']({ session_id = 'remote' }))
+        assert.is_true(fake.bindings['ctrl+[Key' .. key .. ']']({ session_id = 'remote' }))
       end
       assert.are.equal(4, #fake.calls)
-      assert.are.same({}, fake.sent_keys)
       for _, call in ipairs(fake.calls) do
         assert.is_true(call.args.wrap)
       end
@@ -177,31 +142,28 @@ describe('rex side', function()
         record('rex-navigator/v1/passthrough'),
       })
       for _, key in ipairs({ 'H', 'J', 'K', 'L' }) do
-        assert.is_true(fake.bindings['cmd+[Key' .. key .. ']']({ session_id = 'remote' }))
+        assert.is_false(fake.bindings['ctrl+[Key' .. key .. ']']({ session_id = 'remote' }))
       end
       assert.are.same({}, fake.calls)
-      assert.are.same({ 'ctrl+h', 'ctrl+j', 'ctrl+k', 'ctrl+l' }, fake.sent_keys)
     end)
 
     it('recognizes a remote editor from a generic active app report', function()
       local fake = load_rex_side({ name = 'ssh' }, nil, { record(nil) })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({ 'ctrl+h' }, fake.sent_keys)
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('uses inherited app names', function()
       local fake = load_rex_side({ name = 'ssh' }, nil, {
         { id = 'rex-navigator/v1', effective_app = 'nvim', state = 'idle' },
       })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
       assert.is_true(dofile('rex/rex-navigator.lua').is_vim({ '^nvim$' }))
     end)
 
     it('ignores completed, failed, cleared, and unknown status records', function()
       for _, state in ipairs({ 'done', 'error', 'clear', 'unknown' }) do
         local fake = load_rex_side({ name = 'ssh' }, nil, { record(nil, { state = state }) })
-        assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-        assert.are.same({}, fake.sent_keys)
+        assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
       end
     end)
 
@@ -210,68 +172,58 @@ describe('rex side', function()
         record('rex-navigator/v1', { app = 'cargo' }),
         { state = 'idle' },
       })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({}, fake.sent_keys)
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('forwards working and blocked editor reports', function()
       for _, state in ipairs({ 'working', 'blocked' }) do
         local fake = load_rex_side({ name = 'ssh' }, nil, { record(nil, { state = state }) })
-        assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-        assert.are.same({ 'ctrl+h' }, fake.sent_keys)
+        assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
       end
     end)
 
     it('recognizes status reports even when process discovery fails', function()
       local fake = load_rex_side('error', nil, { record(nil) })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({ 'ctrl+h' }, fake.sent_keys)
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('ignores reports owned by an exited SSH process', function()
       local fake = load_rex_side({ name = 'bash', pid = 10 }, nil, {
         record(nil, { owner = { name = 'ssh', pid = 20 } }),
       })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({}, fake.sent_keys)
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('accepts reports owned by the foreground process or an ancestor', function()
       local fake = load_rex_side({ name = 'ssh', pid = 20 }, nil, {
         record(nil, { owner = { name = 'ssh', pid = 20 } }),
       })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
       fake.foreground = { name = 'helper', pid = 30 }
       fake.ancestors = { { name = 'ssh', pid = 20 } }
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({ 'ctrl+h', 'ctrl+h' }, fake.sent_keys)
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('does not mistake a reused PID for the report owner', function()
       local fake = load_rex_side({ name = 'bash', pid = 20 }, nil, {
         record(nil, { owner = { name = 'ssh', pid = 20 } }),
       })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({}, fake.sent_keys)
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('returns to ordinary pane navigation after reports are cleared', function()
       local fake = load_rex_side({ name = 'ssh' }, nil, { record(nil) })
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
       fake.records = {}
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'remote' }))
-      assert.are.same({ 'ctrl+h' }, fake.sent_keys)
-      assert.are.equal(1, #fake.calls)
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'remote' }))
     end)
 
     it('retains local foreground detection on older Rex versions', function()
       local fake = load_rex_side({ name = 'nvim' })
       fake.status_error = true
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'local' }))
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'local' }))
       fake.foreground = { name = 'bash' }
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'local' }))
-      assert.are.same({ 'ctrl+h' }, fake.sent_keys)
-      assert.are.equal(1, #fake.calls)
+      assert.is_true(fake.bindings['ctrl+[KeyH]']({ session_id = 'local' }))
     end)
 
     it('falls back when program_status raises an error', function()
@@ -283,8 +235,7 @@ describe('rex side', function()
         end
         return original(creator, method)
       end
-      assert.is_true(fake.bindings['cmd+[KeyH]']({ session_id = 'local' }))
-      assert.are.same({ 'ctrl+h' }, fake.sent_keys)
+      assert.is_false(fake.bindings['ctrl+[KeyH]']({ session_id = 'local' }))
     end)
   end)
 end)
