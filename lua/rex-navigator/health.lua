@@ -8,7 +8,10 @@ function M.check()
   vim.health.start('rex-navigator')
 
   local navigator = require('rex-navigator')
-  if navigator.uses_osc() then
+  if navigator.initialized == false then
+    navigator.setup()
+  end
+  if navigator.osc == true then
     if vim.fn.has('ttyout') == 1 then
       vim.health.ok('Using OSC 7501 navigation over the terminal connection; no remote rex executable is needed')
     else
@@ -19,11 +22,11 @@ function M.check()
     return
   end
 
-  if vim.env.REX_SESSION and vim.env.REX_SESSION ~= '' then
+  if navigator.in_rex() then
     vim.health.ok('Running inside Rex (REX_SESSION is set)')
   else
     vim.health.warn('No local Rex context or SSH OSC transport; <C-h/j/k/l> only moves between splits', {
-      "Use setup({ osc = true }) to enable OSC navigation explicitly",
+      'Use setup({ osc = true }) to enable OSC navigation explicitly',
     })
   end
 

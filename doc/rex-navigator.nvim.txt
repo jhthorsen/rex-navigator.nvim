@@ -44,13 +44,15 @@ lazy.nvim <https://github.com/folke/lazy.nvim>:
     {
       'wassimk/rex-navigator.nvim',
       version = '*',
+      lazy = false,
       config = true,
     }
 <
 
 
-  [!NOTE] Don’t lazy load the plugin on a key or event. The keymaps need to
-  exist when the first `ctrl-h/j/k/l` arrives from Rex.
+  [!NOTE] Load the plugin at startup. `setup()` installs the normal-mode
+  `<C-h/j/k/l>` mappings and starts OSC reporting over SSH, so Rex can forward
+  the first navigation key to Neovim.
 
 REX ~
 
@@ -80,21 +82,28 @@ These are the defaults:
 
 >lua
     require('rex-navigator').setup({
-      -- map <C-h/j/k/l> in normal mode
-      keymaps = true,
       -- continue from the opposite edge when no Rex pane lies that way
       wrap = false,
+      -- publish navigation over SSH when no local Rex session is available
+      osc = 'auto',
     })
 <
 
-With `keymaps = false`, map the keys yourself:
+`setup()` installs `<C-h/j/k/l>` in normal mode. To customize a mapping,
+override it after calling `setup()` using `navigate('h')`, `navigate('j')`,
+`navigate('k')`, or `navigate('l')`:
 
 >lua
-    vim.keymap.set('n', '<C-h>', require('rex-navigator').left)
-    vim.keymap.set('n', '<C-j>', require('rex-navigator').down)
-    vim.keymap.set('n', '<C-k>', require('rex-navigator').up)
-    vim.keymap.set('n', '<C-l>', require('rex-navigator').right)
+    vim.keymap.set('n', '<C-h>', function()
+      require('rex-navigator').navigate('h')
+    end)
 <
+
+Set `osc = true` to force OSC reporting (for example, if Rex environment
+variables are forwarded over SSH), or `osc = false` to use the local Rex CLI
+transport instead. Configure this when calling `setup()` at startup;
+disabling OSC after it has started is not supported. Over OSC, pane wrapping
+is controlled by the Rex-side `wrap` setting.
 
 
 REX ~
@@ -136,9 +145,15 @@ process. When the process name matches one of `programs`, the binding returns
 `false` and Rex sends the key to the terminal, so Neovim gets it. Otherwise the
 binding moves focus with the server’s `session.focus_direction` method.
 
-In Neovim, the key runs `wincmd`. If the window doesn’t change, Neovim runs
-`rex do` with the same `session.focus_direction` call, using the `REX_SESSION`
-environment variable that Rex sets for programs it starts.
+In a local Rex session, the Neovim key runs `wincmd`. If the window doesn’t
+change, Neovim runs `rex do` with the same `session.focus_direction` call,
+using the `REX_SESSION` environment variable that Rex sets for programs it
+starts.
+
+Over SSH without a local Rex session, Neovim publishes its split directions
+and mode over OSC 7501. Rex forwards navigation keys when Neovim can handle
+them and moves between Rex panes at split edges. No Rex executable is needed
+on the remote host in this mode.
 
 Both sides call the server method rather than Rex’s `pane.focus.*` actions.
 Those actions always wrap, and running them from the command line needs Rex’s

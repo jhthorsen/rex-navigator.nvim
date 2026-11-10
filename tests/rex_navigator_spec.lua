@@ -3,6 +3,7 @@ describe('rex-navigator', function()
   local system_calls
   local original_system
   local original_session
+  local original_ssh_tty, original_ssh_connection
 
   before_each(function()
     package.loaded['rex-navigator'] = nil
@@ -16,6 +17,8 @@ describe('rex-navigator', function()
 
     original_session = vim.env.REX_SESSION
     vim.env.REX_SESSION = 'session:test'
+    original_ssh_tty, original_ssh_connection = vim.env.SSH_TTY, vim.env.SSH_CONNECTION
+    vim.env.SSH_TTY, vim.env.SSH_CONNECTION = nil, nil
 
     vim.cmd('silent! only')
   end)
@@ -23,6 +26,7 @@ describe('rex-navigator', function()
   after_each(function()
     vim.system = original_system
     vim.env.REX_SESSION = original_session
+    vim.env.SSH_TTY, vim.env.SSH_CONNECTION = original_ssh_tty, original_ssh_connection
     vim.cmd('silent! only')
     for _, key in ipairs({ 'h', 'j', 'k', 'l' }) do
       pcall(vim.keymap.del, 'n', '<C-' .. key .. '>')
@@ -37,14 +41,14 @@ describe('rex-navigator', function()
       vim.cmd('wincmd h')
       assert.are.equal(left, vim.api.nvim_get_current_win())
 
-      navigator.right()
+      navigator.navigate('l')
 
       assert.are_not.equal(left, vim.api.nvim_get_current_win())
       assert.are.same({}, system_calls)
     end)
 
     it('asks Rex to focus the next pane when there is no split that way', function()
-      navigator.left()
+      navigator.navigate('h')
 
       assert.are.equal(1, #system_calls)
       local cmd = system_calls[1]
@@ -67,7 +71,7 @@ describe('rex-navigator', function()
     it('does nothing at the edge outside of Rex', function()
       vim.env.REX_SESSION = nil
 
-      navigator.left()
+      navigator.navigate('h')
 
       assert.are.same({}, system_calls)
     end)
@@ -76,6 +80,8 @@ describe('rex-navigator', function()
       assert.has.errors(function()
         navigator.navigate('x')
       end)
+      assert.is_false(navigator.initialized)
+      assert.are.same({}, vim.fn.maparg('<C-h>', 'n', false, true))
     end)
   end)
 
@@ -89,17 +95,22 @@ describe('rex-navigator', function()
       end
     end)
 
-    it('leaves the keys alone when keymaps is false', function()
-      navigator.setup({ keymaps = false })
+    it('maps each key to navigation in its direction', function()
+      navigator.setup()
 
-      local map = vim.fn.maparg('<C-h>', 'n', false, true)
-      assert.is_nil(map.desc)
+      for key, direction in pairs({ h = 'left', j = 'down', k = 'up', l = 'right' }) do
+        system_calls = {}
+        local map = vim.fn.maparg('<C-' .. key .. '>', 'n', false, true)
+        map.callback()
+        assert.are.equal(1, #system_calls)
+        assert.truthy(system_calls[1][4]:find(string.format('direction = %q', direction), 1, true))
+      end
     end)
 
     it('passes wrap through to Rex', function()
-      navigator.setup({ keymaps = false, wrap = true })
+      navigator.setup({ wrap = true })
 
-      navigator.left()
+      navigator.navigate('h')
 
       assert.truthy(system_calls[1][4]:find('wrap = true', 1, true))
     end)

@@ -6,18 +6,13 @@
 -- forwards these keys to Neovim when it is the focused program.
 --
 
-local M = {}
-
-local defaults = {
-  -- map <C-h/j/k/l> in normal mode
-  keymaps = true,
+local M = {
+  initialized = false,
   -- continue from the opposite edge when no Rex pane lies that way
   wrap = false,
   -- publish split navigation over OSC 7501 when SSH has no local Rex context
   osc = 'auto',
 }
-
-local config = vim.deepcopy(defaults)
 
 local directions = {
   h = 'left',
@@ -44,7 +39,7 @@ function M.focus_command(direction)
     string.format(
       'rex.call("session.focus_direction", { session_id = rex.session_id, direction = %q, wrap = %s })',
       direction,
-      tostring(config.wrap)
+      tostring(M.wrap)
     ),
   }
 end
@@ -53,57 +48,49 @@ function M.in_rex()
   return vim.env.REX_SESSION ~= nil and vim.env.REX_SESSION ~= ''
 end
 
-function M.uses_osc()
-  if config.osc ~= 'auto' then
-    return config.osc == true
-  end
-  return not M.in_rex()
-    and ((vim.env.SSH_TTY or '') ~= '' or (vim.env.SSH_CONNECTION or '') ~= '')
-end
-
 function M.navigate(key)
   local direction = directions[key]
   if not direction then
     error(string.format('rex-navigator: unknown direction key %q', key))
   end
 
+  if M.initialized == false then
+    M.setup()
+  end
+
   local win = vim.api.nvim_get_current_win()
   vim.cmd.wincmd(key)
 
-  if vim.api.nvim_get_current_win() == win and M.in_rex() and not M.uses_osc() then
+  if M.osc == true then
+    require('rex-navigator.osc').update()
+  elseif vim.api.nvim_get_current_win() == win and M.in_rex() then
     vim.system(M.focus_command(direction))
   end
-
-  require('rex-navigator.osc').update()
-end
-
-function M.left()
-  M.navigate('h')
-end
-
-function M.down()
-  M.navigate('j')
-end
-
-function M.up()
-  M.navigate('k')
-end
-
-function M.right()
-  M.navigate('l')
 end
 
 function M.setup(opts)
-  config = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
-  require('rex-navigator.osc').setup(M.uses_osc())
-
-  if config.keymaps then
-    for key, direction in pairs(directions) do
-      vim.keymap.set('n', '<C-' .. key .. '>', function()
-        M.navigate(key)
-      end, { desc = 'Move to the split or Rex pane ' .. direction })
-    end
+  opts = opts or {}
+  if opts.wrap ~= nil then
+    M.wrap = opts.wrap
   end
+  if opts.osc ~= nil then
+    M.osc = opts.osc
+  end
+
+  if M.osc == 'auto' then
+    M.osc = not M.in_rex() and ((vim.env.SSH_TTY or '') ~= '' or (vim.env.SSH_CONNECTION or '') ~= '')
+  end
+  if M.osc == true then
+    require('rex-navigator.osc').setup()
+  end
+
+  for key, direction in pairs(directions) do
+    vim.keymap.set('n', '<C-' .. key .. '>', function()
+      M.navigate(key)
+    end, { desc = 'Move to the split or Rex pane ' .. direction })
+  end
+
+  M.initialized = true
 end
 
 return M

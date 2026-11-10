@@ -4,7 +4,6 @@ local M = {}
 
 local namespace = 'rex-navigator'
 local directions = { h = 'left', j = 'down', k = 'up', l = 'right' }
-local enabled = false
 local paused = false
 local last_report
 local generation = 0
@@ -28,7 +27,7 @@ function M.clear()
 end
 
 function M.update()
-  if not enabled or paused then
+  if paused then
     return
   end
 
@@ -52,16 +51,12 @@ function M.update()
   end
 end
 
-function M.setup(active)
+function M.setup()
   generation = generation + 1
   local current_generation = generation
+
   M.clear()
-  enabled = active
   paused = false
-  local group = vim.api.nvim_create_augroup('RexNavigatorOSC', { clear = true })
-  if not enabled then
-    return
-  end
 
   local function schedule_update()
     vim.schedule(function()
@@ -71,6 +66,7 @@ function M.setup(active)
     end)
   end
 
+  local group = vim.api.nvim_create_augroup('RexNavigatorOSC', { clear = true })
   vim.api.nvim_create_autocmd({
     'VimEnter',
     'UIEnter',
@@ -94,6 +90,7 @@ function M.setup(active)
       M.clear()
     end,
   })
+
   vim.api.nvim_create_autocmd('VimResume', {
     group = group,
     callback = function()
@@ -101,7 +98,10 @@ function M.setup(active)
       schedule_update()
     end,
   })
+
   schedule_update()
+
+  return true
 end
 
 return M

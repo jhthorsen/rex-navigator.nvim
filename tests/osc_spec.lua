@@ -20,8 +20,8 @@ describe('OSC navigation', function()
   before_each(function()
     package.loaded['rex-navigator'] = nil
     navigator = require('rex-navigator')
+    package.loaded['rex-navigator.osc'] = nil
     osc = require('rex-navigator.osc')
-    osc.setup(false)
     original_env = {}
     for _, name in ipairs({ 'REX_SESSION', 'SSH_TTY', 'SSH_CONNECTION' }) do
       original_env[name] = vim.env[name] or false
@@ -48,7 +48,10 @@ describe('OSC navigation', function()
   end)
 
   after_each(function()
-    osc.setup(false)
+    if vim.fn.exists('#RexNavigatorOSC') == 1 then
+      vim.api.nvim_exec_autocmds('VimLeavePre', { group = 'RexNavigatorOSC' })
+      vim.api.nvim_del_augroup_by_name('RexNavigatorOSC')
+    end
     drain()
     vim.fn.has, vim.api.nvim_chan_send = original_has, original_send
     vim.system, vim.api.nvim_get_mode = original_system, original_mode
@@ -56,79 +59,87 @@ describe('OSC navigation', function()
       vim.env[name] = value or nil
     end
     vim.cmd('silent! only')
+    for _, key in ipairs({ 'h', 'j', 'k', 'l' }) do
+      pcall(vim.keymap.del, 'n', '<C-' .. key .. '>')
+    end
   end)
 
   it('automatically enables OSC over SSH without Rex environment variables', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
-    assert.is_true(navigator.uses_osc())
+    assert.is_true(navigator.osc)
     assert.is_true(contains('\027]7501;state=idle:app=nvim:id=rex-navigator/v1\027\\'))
     assert.is_false(contains('id=rex-navigator/v1/left'))
-    navigator.left()
+    navigator.navigate('h')
     assert.are.same({}, calls)
   end)
 
   it('also detects SSH_CONNECTION when SSH_TTY is missing', function()
     vim.env.SSH_TTY = nil
     vim.env.SSH_CONNECTION = '192.0.2.1 1234 192.0.2.2 22'
-    navigator.setup({ keymaps = false })
-    assert.is_true(navigator.uses_osc())
+    navigator.setup()
+    assert.is_true(navigator.osc)
   end)
 
   it('keeps the CLI transport inside a local Rex session', function()
     vim.env.REX_SESSION = 'session:local'
-    navigator.setup({ keymaps = false })
+    vim.env.SSH_CONNECTION = '192.0.2.1 1234 192.0.2.2 22'
+    navigator.setup()
     drain()
-    assert.is_false(navigator.uses_osc())
+    assert.is_false(navigator.osc)
     assert.are.same({}, writes)
-    navigator.left()
+    navigator.navigate('h')
     assert.are.equal(1, #calls)
   end)
 
-  it('does not report outside SSH or Rex unless explicitly enabled', function()
+  it('does not report outside SSH or Rex by default', function()
     vim.env.SSH_TTY = nil
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
-    assert.is_false(navigator.uses_osc())
+    assert.is_false(navigator.osc)
     assert.are.same({}, writes)
-    navigator.setup({ keymaps = false, osc = true })
+  end)
+
+  it('can explicitly enable OSC outside SSH or Rex', function()
+    vim.env.SSH_TTY = nil
+    navigator.setup({ osc = true })
     drain()
     assert.is_true(contains('state=idle:app=nvim:id=rex-navigator/v1'))
   end)
 
   it('can opt out of OSC reporting over SSH', function()
-    navigator.setup({ keymaps = false, osc = false })
+    navigator.setup({ osc = false })
     drain()
-    assert.is_false(navigator.uses_osc())
+    assert.is_false(navigator.osc)
     assert.are.same({}, writes)
   end)
 
   it('never invokes the CLI when OSC is explicitly enabled', function()
     vim.env.REX_SESSION = 'session:forwarded'
-    navigator.setup({ keymaps = false, osc = true })
-    navigator.left()
+    navigator.setup({ osc = true })
+    navigator.navigate('h')
     assert.are.same({}, calls)
   end)
 
   it('reports neighbors and updates after moving between splits', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     vim.cmd('vsplit')
     drain()
     assert.is_true(contains('id=rex-navigator/v1/right'))
     writes = {}
-    navigator.right()
+    navigator.navigate('l')
     assert.is_true(contains('id=rex-navigator/v1/left'))
     assert.is_false(contains('id=rex-navigator/v1/right'))
     assert.are.same({}, calls)
   end)
 
   it('reports vertical neighbors and clears reports after closing splits', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     vim.cmd('split')
     drain()
     assert.is_true(contains('id=rex-navigator/v1/down'))
     writes = {}
-    navigator.down()
+    navigator.navigate('j')
     assert.is_true(contains('id=rex-navigator/v1/up'))
     writes = {}
     vim.cmd('only')
@@ -139,7 +150,7 @@ describe('OSC navigation', function()
   end)
 
   it('forwards non-normal-mode keys instead of treating them as pane navigation', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     for _, mode in ipairs({ 'i', 'c', 't', 'v', 'no' }) do
       vim.api.nvim_get_mode = function()
@@ -160,10 +171,14 @@ describe('OSC navigation', function()
   end)
 
   it('keeps keys in floating windows', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     local window = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), true, {
-      relative = 'editor', row = 1, col = 1, width = 10, height = 5,
+      relative = 'editor',
+      row = 1,
+      col = 1,
+      width = 10,
+      height = 5,
     })
     drain()
     assert.is_true(contains('id=rex-navigator/v1/passthrough'))
@@ -174,7 +189,7 @@ describe('OSC navigation', function()
   end)
 
   it('avoids repeatedly writing unchanged state', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     writes = {}
     osc.update()
@@ -185,7 +200,7 @@ describe('OSC navigation', function()
   end)
 
   it('clears only its namespace on suspend and republishes on resume', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     writes = {}
     vim.api.nvim_exec_autocmds('WinEnter', {})
@@ -199,7 +214,7 @@ describe('OSC navigation', function()
   end)
 
   it('clears on exit and prevents queued updates from recreating records', function()
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     writes = {}
     vim.api.nvim_exec_autocmds('WinEnter', {})
@@ -208,15 +223,13 @@ describe('OSC navigation', function()
     assert.are.same({ '\027]7501;state=clear:id=rex-navigator\027\\' }, writes)
   end)
 
-  it('clears previous reports when disabled or set up again', function()
-    navigator.setup({ keymaps = false })
+  it('clears previous reports and invalidates queued updates when set up again', function()
+    navigator.setup()
     drain()
     writes = {}
-    navigator.setup({ keymaps = false, osc = false })
-    drain()
+    navigator.setup()
     assert.are.same({ '\027]7501;state=clear:id=rex-navigator\027\\' }, writes)
-    navigator.setup({ keymaps = false })
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     writes = {}
     drain()
     assert.are.equal(1, #writes)
@@ -224,7 +237,7 @@ describe('OSC navigation', function()
 
   it('does not write escapes into a headless session or redirected stdout', function()
     vim.fn.has = original_has
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     assert.are.same({}, writes)
   end)
@@ -233,10 +246,10 @@ describe('OSC navigation', function()
     vim.api.nvim_chan_send = function()
       error('closed channel')
     end
-    navigator.setup({ keymaps = false })
+    navigator.setup()
     drain()
     assert.has_no.errors(function()
-      navigator.left()
+      navigator.navigate('h')
     end)
   end)
 end)
